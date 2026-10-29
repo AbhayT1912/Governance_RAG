@@ -32,7 +32,7 @@ The system builds a relationship map using the following logic:
 
 ### Prerequisites
 
-- Node.js (v20.6.0 or higher for native env support)
+- Node.js 22 or newer (required by the Pinecone TypeScript SDK v9)
 - Git (required when ingesting a repository by URL)
 - Neo4j Instance (Aura or Local)
 - Pinecone API Key
@@ -56,11 +56,14 @@ The system builds a relationship map using the following logic:
     NEO4J_PASSWORD=your_password
     ```
 
-The Pinecone index must use the same vector dimension returned by
-`gemini-embedding-001` (3072 dimensions with the current embedding request).
-Set `ENABLE_NEO4J=true` and valid Neo4j credentials to store graph nodes and
-relationships. With Neo4j disabled, vector ingestion and retrieval still work,
-but graph context is unavailable.
+The RAG service detects the configured Pinecone index schema at runtime. For a
+document-schema index, configure a string `chunk_text` field with integrated
+embedding and an optional string `title` field. Pinecone then embeds chunks and
+queries through its Documents API. For a classic vector index, the service keeps
+using `gemini-embedding-001`; that index must match the embedding dimension
+returned by Gemini. Set `ENABLE_NEO4J=true` and valid Neo4j credentials to store
+graph nodes and relationships. With Neo4j disabled, vector ingestion and
+retrieval still work, but graph context is unavailable.
 
 ### Usage
 
@@ -100,4 +103,4 @@ docker run --rm -p 8000:8000 --env-file .env codelens-rag
 
 ### Governance result indexing
 
-`POST /governance/index` accepts finalized findings and decisions, embeds them into the same repo-scoped vector index as source chunks, and preserves finding IDs and evidence references as metadata. Q&A retrieval can therefore cite prior governance results. The backend calls this endpoint after consensus and records indexing status on the analysis job.
+`POST /governance/index` accepts finalized findings and decisions, writes them to the same repo-scoped Pinecone index as source chunks, and preserves finding IDs and evidence references as filterable document fields. Q&A retrieval can therefore cite prior governance results. The backend calls this endpoint after consensus and records indexing status on the analysis job. Document-schema indexes use Pinecone's Documents API; classic indexes continue using vector operations.

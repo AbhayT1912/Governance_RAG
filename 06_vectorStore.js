@@ -1,6 +1,12 @@
 import "dotenv/config";
 import { Pinecone } from "@pinecone-database/pinecone";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  fromPineconeDocument,
+  getDocumentTextField,
+  searchDocumentsUntilVisible,
+  toPineconeDocument,
+} from "./pineconeDocuments.js";
 
 /* ===============================
    Init Gemini + Pinecone
@@ -16,6 +22,7 @@ const pc = new Pinecone({
 });
 
 const INDEX_NAME = process.env.PINECONE_INDEX || "hackathon-index";
+let indexDescriptionPromise;
 
 /* ===============================
    EMBEDDING FUNCTION (STABLE)
@@ -53,7 +60,17 @@ function sanitizeMetadata(metadata) {
 }
 
 function getIndex() {
-  return pc.index(INDEX_NAME);
+  return pc.index({ name: INDEX_NAME });
+}
+
+async function getIndexSchema() {
+  if (!indexDescriptionPromise) {
+    indexDescriptionPromise = pc.describeIndex(INDEX_NAME).catch((error) => {
+      indexDescriptionPromise = null;
+      throw error;
+    });
+  }
+  return (await indexDescriptionPromise)?.schema?.fields || null;
 }
 
 export async function clearRepoChunks(repoId) {
@@ -61,11 +78,12 @@ export async function clearRepoChunks(repoId) {
     throw new Error("A non-empty repoId is required to clear repo chunks");
   }
 
-  await getIndex().deleteMany({
-    filter: {
+  const index = getIndex();
+  const filter = {
       repoId: { $eq: repoId },
-    },
-  });
+  };
+  if (await getIndexSchema()) await index.documents.delete({ filter });
+  else await index.deleteMany({ filter });
 
   console.log(`Cleared existing Pinecone records for repoId=${repoId}`);
 }
@@ -80,8 +98,15 @@ export async function storeChunks(chunks) {
   }
 
   const index = getIndex();
+  const schema = await getIndexSchema();
+  const documentTextField = getDocumentTextField(schema);
+  if (schema && !documentTextField) {
+    throw new Error("Pinecone document index needs a searchable string field for repository chunks.");
+  }
 
-  console.log(`Embedding ${chunks.length} chunks...`);
+  console.log(schema
+    ? `Indexing ${chunks.length} chunks through the Pinecone Documents API...`
+    : `Embedding ${chunks.length} chunks...`);
   const EMBED_BATCH_SIZE = Number(process.env.EMBED_BATCH_SIZE || 50);
   if (!Number.isInteger(EMBED_BATCH_SIZE) || EMBED_BATCH_SIZE < 1) {
     throw new Error("EMBED_BATCH_SIZE must be a positive integer");
@@ -91,6 +116,17 @@ export async function storeChunks(chunks) {
 
   for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
     const chunkBatch = chunks.slice(i, i + EMBED_BATCH_SIZE);
+    if (schema) {
+      const docs = chunkBatch.map((chunk) => toPineconeDocument(chunk, documentTextField, schema));
+      const result = await index.documents.upsert({ documents: docs });
+      if (result.upsertedCount !== docs.length) {
+        throw new Error(`Pinecone accepted ${result.upsertedCount ?? 0} of ${docs.length} documents in batch ${Math.floor(i / EMBED_BATCH_SIZE) + 1}`);
+      }
+      storedVectors += result.upsertedCount;
+      console.log(`Upserted document batch ${Math.floor(i / EMBED_BATCH_SIZE) + 1} with ${docs.length} chunks.`);
+      continue;
+    }
+
     const result = await embeddingModel.batchEmbedContents({
       requests: chunkBatch.map((chunk) => ({
         content: { parts: [{ text: chunk.text }] },
@@ -159,13 +195,14 @@ export async function indexGovernanceResults({ repoId, jobId, findings = [], dec
     throw new Error("Every finding and decision must include its required identifiers and content");
   }
   if (replace === true) {
-    await getIndex().deleteMany({
-      filter: {
+    const index = getIndex();
+    const filter = {
         repoId: { $eq: repoId },
         jobId: { $eq: jobId },
         type: { $in: ["governance_finding", "governance_decision"] },
-      },
-    });
+    };
+    if (await getIndexSchema()) await index.documents.delete({ filter });
+    else await index.deleteMany({ filter });
   }
   const chunks = [
     ...findings.map((finding) => ({
@@ -228,15 +265,35 @@ export async function semanticSearch(query, repoId, topK = 10) {
 
   const index = pc.index(INDEX_NAME);
 
-  const embedding = await embedText(query);
+  const schema = await getIndexSchema();
+  if (schema) {
+    const textField = getDocumentTextField(schema);
+    if (!textField) throw new Error("Pinecone document index has no searchable text field.");
+    const filter = {
+      repoId: { $eq: repoId },
+    };
+    const scoring = schema[textField].embed
+      ? [{ type: "embed", field: textField, query }]
+      : [{ type: "text", fields: [textField], query }];
+    const searchRequest = {
+      scoreBy: scoring,
+      topK,
+      includeFields: ["*"],
+      filter,
+    };
+    const result = await searchDocumentsUntilVisible(
+      (request) => index.documents.search(request),
+      searchRequest,
+    );
+    return (result.matches || []).map((match) => fromPineconeDocument(match, textField));
+  }
 
+  const embedding = await embedText(query);
   const result = await index.query({
     vector: embedding,
     topK,
     includeMetadata: true,
-    filter: {
-      repoId: { $eq: repoId },
-    },
+    filter: { repoId: { $eq: repoId } },
   });
 
   return (result.matches || []).map(match => match.metadata);
