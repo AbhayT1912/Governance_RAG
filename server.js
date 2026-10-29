@@ -2,6 +2,7 @@ import express from "express";
 import { ingestProject } from "./ingestData.js";
 import { askQuestion } from "./ask.js";
 import { indexGovernanceResults } from "./06_vectorStore.js";
+import { requireRagServiceAuth } from "./ragServiceAuth.js";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -14,6 +15,13 @@ app.use((req, _res, next) => {
   });
   next();
 });
+
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "OK", service: "repolens-rag" });
+});
+
+// Keep model, vector-store, and ingestion operations private to the backend.
+app.use(requireRagServiceAuth);
 
 app.post("/ingest", async (req, res) => {
   const { repoPath, repoUrl, repo_url: repoUrlSnake, repoId } = req.body;

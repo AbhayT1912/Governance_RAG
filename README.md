@@ -101,6 +101,10 @@ docker build -t codelens-rag .
 docker run --rm -p 8000:8000 --env-file .env codelens-rag
 ```
 
+### Production service access
+
+Set `NODE_ENV=production` and configure `RAG_SERVICE_TOKEN` with a random value of at least 32 characters. Configure the exact same token on the RepoLens backend. `/ingest`, `/ask`, and `/governance/index` require that bearer token; `/health` remains public for deployment health checks. Keep this service on a private network where possible and store the token in the hosting provider's secret manager, not in source control.
+
 ### Governance result indexing
 
 `POST /governance/index` accepts finalized findings and decisions, writes them to the same repo-scoped Pinecone index as source chunks, and preserves finding IDs and evidence references as filterable document fields. Q&A retrieval can therefore cite prior governance results. The backend calls this endpoint after consensus and records indexing status on the analysis job. Document-schema indexes use Pinecone's Documents API; classic indexes continue using vector operations.
