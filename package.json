@@ -1,0 +1,25 @@
+{
+  "name": "hackathon_project_demo",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@google/genai": "^1.42.0",
+    "@google/generative-ai": "^0.24.1",
+    "@pinecone-database/pinecone": "^7.2.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "neo4j-driver": "^6.0.1",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-javascript": "^0.21.0",
+    "tree-sitter-python": "^0.21.0",
+    "tree-sitter-typescript": "^0.23.2"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "ask": "node ask.js",
+    "upload": "node ingestData.js"
+  }
+}
