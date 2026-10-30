@@ -114,6 +114,10 @@ app.post("/governance/index", async (req, res) => {
   }
 });
 
+app.get("/health", (req,res) => {
+  return res.status(200).json({message: `Server is healthy`});
+});
+
 const port = Number(process.env.PORT || 8000);
 app.listen(port, "0.0.0.0", () => {
   console.log(`GraphRAG service running on port ${port}`);
